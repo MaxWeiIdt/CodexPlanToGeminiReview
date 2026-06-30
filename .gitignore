@@ -1,0 +1,4 @@
+﻿.codex/review/
+**/__pycache__/
+*.pyc
+
