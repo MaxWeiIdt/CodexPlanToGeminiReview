@@ -2,7 +2,7 @@
 
 此文件整理 `$gemini-review` skill 的實際工作流程，供後續維護者或外部專案導入者理解 Codex 在修改程式、設定、批次流程、API 流程、資料處理流程或技術文件後，如何透過 Gemini/Antigravity backend 進行 Review Gate。此流程負責保存 review 狀態、產生實作計畫、維持同一個 reviewer session，並在 reviewer 明確核准後才寫入核准標記；它不負責取代人工需求確認，也不應用來跳過未處理的 review 意見。
 
-本資料夾同時提供提示詞、專案內 `.codex/review/` 檔案範本，以及使用者環境 `%USERPROFILE%` 下需要部署的 `.codex`、`.agents` 範例檔。實際執行時，review script 會依專案狀態自動新增或更新部分檔案，Codex 仍需負責先寫好 `implementation-plan.md`，並在 reviewer 要求修改時持續修正與重跑審查。
+本資料夾同時提供提示詞、專案內 `.codex/review/` 檔案範本，以及使用者環境 `%USERPROFILE%` 下需要部署的 `.codex`、`.agents`、hooks 範例檔。實際執行時，review script 會依專案狀態自動新增或更新部分檔案，Codex 仍需負責先寫好 `implementation-plan.md`，並在 reviewer 要求修改時持續修正與重跑審查。
 
 ## 1. 功能概要
 
@@ -174,7 +174,10 @@ python "$env:USERPROFILE\.codex\review-scripts\gemini_review.py"
 %USERPROFILE%
   .codex
     AGENTS.md
+    hooks.json
     gemini-review.secrets.json
+    hooks
+      stop_review_gate.py
     review-scripts
       gemini_review.py
   .agents
@@ -188,6 +191,8 @@ python "$env:USERPROFILE\.codex\review-scripts\gemini_review.py"
 | 文件包檔案 | 目標位置 | 說明 |
 |---|---|---|
 | `environment-files/user-home/codex/AGENTS.md` | `%USERPROFILE%\.codex\AGENTS.md` | Codex 使用者層級規則，定義 Gemini Review Gate 的觸發條件、外送同意與跳過指令。 |
+| `environment-files/user-home/codex/hooks.example.json` | `%USERPROFILE%\.codex\hooks.json` | Codex hooks 設定範本，註冊 Stop hook 來檢查 review gate。 |
+| `environment-files/user-home/codex/hooks/stop_review_gate.py` | `%USERPROFILE%\.codex\hooks\stop_review_gate.py` | Stop hook 實作；在 Codex 結束回合前檢查專案 `.codex/review/approval.marker`。 |
 | `environment-files/user-home/codex/review-scripts/gemini_review.py` | `%USERPROFILE%\.codex\review-scripts\gemini_review.py` | 實際呼叫 Gemini/Antigravity backend 的 review script。 |
 | `environment-files/user-home/codex/gemini-review.secrets.example.json` | `%USERPROFILE%\.codex\gemini-review.secrets.json` | backend 設定範本；複製後移除 `.example` 並填入使用者自己的設定。 |
 | `environment-files/user-home/agents/skills/gemini-review/SKILL.md` | `%USERPROFILE%\.agents\skills\gemini-review\SKILL.md` | Codex skill 規則，讓 Codex 知道何時與如何執行 Gemini Review Gate。 |
@@ -202,20 +207,83 @@ python "$env:USERPROFILE\.codex\review-scripts\gemini_review.py"
 | `agy_add_dir` | 是否在 `agy_cli` 模式帶入 `--add-dir <project-root>`。 |
 | `api_key` | `api` 模式使用；也可改用環境變數 `GEMINI_API_KEY` 或 `GOOGLE_API_KEY`。 |
 
+### 9.1 Hooks 設定
+
+`hooks.json` 是讓 Review Gate 真正具備阻擋效果的使用者環境設定。`$gemini-review` skill 負責執行 review，而 Stop hook 會在 Codex 準備結束回合時檢查目前專案是否已通過 review。
+
+| 檔案或狀態 | 說明 |
+|---|---|
+| `%USERPROFILE%\.codex\hooks.json` | 註冊 Codex `Stop` hook，指向 `stop_review_gate.py`。 |
+| `%USERPROFILE%\.codex\hooks\stop_review_gate.py` | 檢查目前專案 `.codex/review/` 狀態。 |
+| `.codex/review/enabled` | 專案 opt-in 標記；不存在時 hook 直接放行，避免一般問答被擋。 |
+| `.codex/review/approval.marker` | 最後一行必須是 `[REVIEW_APPROVED]`，Stop hook 才會放行。 |
+| `.codex/review/skip-once` | 單次跳過標記；只有使用者明確要求跳過時才可建立，hook 讀到後會刪除並放行一次。 |
+
+`hooks.example.json` 內的 `command` 使用 `%USERPROFILE%` 作為可攜式範例：
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python %USERPROFILE%\\.codex\\hooks\\stop_review_gate.py",
+            "timeout": 30,
+            "statusMessage": "Checking Gemini review gate"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+若 Codex 執行環境沒有展開 `%USERPROFILE%`，請把 `command` 改成使用者自己的絕對路徑，例如 `python C:\Users\<user>\.codex\hooks\stop_review_gate.py`。對外文件不應填入特定人員帳號。
+
+
+### 9.2 自動部署腳本
+
+若使用者本機已安裝 Node.js，可直接執行部署腳本，將本文件包內的 Codex skill、review script、Stop hook 與設定範本複製到使用者環境。請在下載後的 repo 根目錄執行，不要切到 `%USERPROFILE%\.codex` 目錄，因為腳本會從 repo 內的 `environment-files/` 讀取來源檔案：
+
+```powershell
+node scripts/install-skill.js
+```
+
+`scripts/install-skill.js` 會處理以下目標位置：
+
+| 來源 | 目標 | 覆蓋規則 |
+|---|---|---|
+| `environment-files/user-home/agents/skills/gemini-review/` | `%USERPROFILE%\.agents\skills\gemini-review\` | 直接同步 skill 檔案。 |
+| `environment-files/user-home/codex/review-scripts/gemini_review.py` | `%USERPROFILE%\.codex\review-scripts\gemini_review.py` | 直接更新 review script。 |
+| `environment-files/user-home/codex/hooks/stop_review_gate.py` | `%USERPROFILE%\.codex\hooks\stop_review_gate.py` | 直接更新 Stop hook。 |
+| `environment-files/user-home/codex/hooks.example.json` | `%USERPROFILE%\.codex\hooks.json` | 目標不存在才建立，避免覆蓋既有 hooks。 |
+| `environment-files/user-home/codex/gemini-review.secrets.example.json` | `%USERPROFILE%\.codex\gemini-review.secrets.json` | 目標不存在才建立，避免覆蓋金鑰設定。 |
+| `environment-files/user-home/codex/AGENTS.md` | `%USERPROFILE%\.codex\AGENTS.md` | 目標不存在才建立，避免覆蓋既有 Codex 規則。 |
+
+腳本不會自動填寫 API key，也不會覆蓋既有 `hooks.json`、`gemini-review.secrets.json` 或 `AGENTS.md`。若這些檔案已存在，請手動合併本文件包提供的 Gemini Review Gate 區塊。
+
+若要手動部署，才需要依下列步驟把檔案複製到 `%USERPROFILE%\.codex` 與 `%USERPROFILE%\.agents`：
+
 建置步驟：
 
-1. 建立 `%USERPROFILE%\.codex\review-scripts\` 與 `%USERPROFILE%\.agents\skills\gemini-review\`。
+1. 建立 `%USERPROFILE%\.codex\hooks\`、`%USERPROFILE%\.codex\review-scripts\` 與 `%USERPROFILE%\.agents\skills\gemini-review\`。
 2. 複製 `AGENTS.md` 到 `%USERPROFILE%\.codex\AGENTS.md`；若使用者已有既有規則，請合併 Gemini Review Gate 章節，不要直接覆蓋。
-3. 複製 `gemini_review.py` 到 `%USERPROFILE%\.codex\review-scripts\gemini_review.py`。
-4. 複製 `gemini-review.secrets.example.json` 為 `%USERPROFILE%\.codex\gemini-review.secrets.json`。
-5. 依使用 backend 修改 `gemini-review.secrets.json`；若使用 `api` 模式，不要把 API key 提交到任何專案版本庫。
-6. 複製 `SKILL.md` 到 `%USERPROFILE%\.agents\skills\gemini-review\SKILL.md`。
-7. 在要啟用 Review Gate 的專案中，依本文件的 `.codex/review/` 流程初始化專案狀態。
+3. 複製 `hooks.example.json` 為 `%USERPROFILE%\.codex\hooks.json`，並確認 `command` 可在該使用者環境執行。
+4. 複製 `stop_review_gate.py` 到 `%USERPROFILE%\.codex\hooks\stop_review_gate.py`。
+5. 複製 `gemini_review.py` 到 `%USERPROFILE%\.codex\review-scripts\gemini_review.py`。
+6. 複製 `gemini-review.secrets.example.json` 為 `%USERPROFILE%\.codex\gemini-review.secrets.json`。
+7. 依使用 backend 修改 `gemini-review.secrets.json`；若使用 `api` 模式，不要把 API key 提交到任何專案版本庫。
+8. 複製 `SKILL.md` 到 `%USERPROFILE%\.agents\skills\gemini-review\SKILL.md`。
+9. 在要啟用 Review Gate 的專案中，依本文件的 `.codex/review/` 流程初始化專案狀態。
 
 可用以下 PowerShell 檢查部署後的檔案是否存在：
 
 ```powershell
 Test-Path "$env:USERPROFILE\.codex\AGENTS.md"
+Test-Path "$env:USERPROFILE\.codex\hooks.json"
+Test-Path "$env:USERPROFILE\.codex\hooks\stop_review_gate.py"
 Test-Path "$env:USERPROFILE\.codex\review-scripts\gemini_review.py"
 Test-Path "$env:USERPROFILE\.codex\gemini-review.secrets.json"
 Test-Path "$env:USERPROFILE\.agents\skills\gemini-review\SKILL.md"
@@ -237,10 +305,13 @@ Test-Path "$env:USERPROFILE\.agents\skills\gemini-review\SKILL.md"
 此範例適合把本文件包交給新使用者時使用。目標是先把 `AGENTS.md`、`SKILL.md`、`gemini_review.py` 與 secrets 範本放到正確位置。
 
 ```powershell
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.codex\hooks"
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.codex\review-scripts"
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.agents\skills\gemini-review"
 
 Copy-Item -Path ".\environment-files\user-home\codex\AGENTS.md" -Destination "$env:USERPROFILE\.codex\AGENTS.md"
+Copy-Item -Path ".\environment-files\user-home\codex\hooks.example.json" -Destination "$env:USERPROFILE\.codex\hooks.json"
+Copy-Item -Path ".\environment-files\user-home\codex\hooks\stop_review_gate.py" -Destination "$env:USERPROFILE\.codex\hooks\stop_review_gate.py"
 Copy-Item -Path ".\environment-files\user-home\codex\review-scripts\gemini_review.py" -Destination "$env:USERPROFILE\.codex\review-scripts\gemini_review.py"
 Copy-Item -Path ".\environment-files\user-home\codex\gemini-review.secrets.example.json" -Destination "$env:USERPROFILE\.codex\gemini-review.secrets.json"
 Copy-Item -Path ".\environment-files\user-home\agents\skills\gemini-review\SKILL.md" -Destination "$env:USERPROFILE\.agents\skills\gemini-review\SKILL.md"
@@ -248,7 +319,18 @@ Copy-Item -Path ".\environment-files\user-home\agents\skills\gemini-review\SKILL
 
 若使用者已經有 `%USERPROFILE%\.codex\AGENTS.md`，不要直接覆蓋。應手動把 `environment-files/user-home/codex/AGENTS.md` 內的 Gemini Review Gate 章節合併進既有檔案。
 
-### 10.2 使用 Antigravity CLI 作為 reviewer
+
+### 10.2 使用部署腳本安裝
+
+若只要快速安裝到目前使用者環境，請先切換到本 repo 根目錄，再執行：
+
+```powershell
+node scripts/install-skill.js
+```
+
+執行後仍需檢查 `%USERPROFILE%\.codex\gemini-review.secrets.json`，確認 `mode`、`api_key`、`agy_project` 或其他 backend 設定符合本機環境。若 `%USERPROFILE%\.codex\hooks.json` 已存在，部署腳本不會覆蓋，需自行確認是否已包含 Stop hook 設定。
+
+### 10.3 使用 Antigravity CLI 作為 reviewer
 
 `agy_cli` 適合已安裝並登入 Antigravity CLI 的環境。設定檔可維持不填 API key：
 
@@ -276,7 +358,7 @@ Copy-Item -Path ".\environment-files\user-home\agents\skills\gemini-review\SKILL
 
 若本機 CLI 不支援 `--add-dir`，將 `agy_add_dir` 改成 `false`。
 
-### 10.3 使用 Gemini API 作為 reviewer
+### 10.4 使用 Gemini API 作為 reviewer
 
 `api` 適合不透過 Antigravity CLI、直接呼叫 Gemini API 的環境。API key 可放在 `%USERPROFILE%\.codex\gemini-review.secrets.json`：
 
@@ -299,7 +381,7 @@ python "$env:USERPROFILE\.codex\review-scripts\gemini_review.py"
 
 維護建議是優先使用環境變數或安全的 secrets 管理方式，不要把真實 API key 放進專案資料夾或文件包。
 
-### 10.4 專案第一次啟用 Review Gate
+### 10.5 專案第一次啟用 Review Gate
 
 在要啟用 Review Gate 的專案根目錄執行：
 
@@ -321,7 +403,7 @@ python "$env:USERPROFILE\.codex\review-scripts\gemini_review.py"
 
 接著在實作完成後更新 `.codex/review/implementation-plan.md`，再重新執行 review script。若專案沒有 `.codex/review/external-review-consent.md`，Codex 必須先取得使用者明確同意，才可送到 Gemini/Antigravity backend。
 
-### 10.5 一次文件修改任務的 review 流程
+### 10.6 一次文件修改任務的 review 流程
 
 例如使用者要求「幫我新增 README 的部署說明」，Codex 應維護以下狀態：
 
@@ -361,7 +443,7 @@ python "$env:USERPROFILE\.codex\review-scripts\gemini_review.py"
 若外部使用者已有 `AGENTS.md`，直接覆蓋可能造成既有規則遺失。
 ```
 
-### 10.6 reviewer 要求修改時
+### 10.7 reviewer 要求修改時
 
 若 `.codex/review/last-review.md` 顯示 `Not Approved`，不要寫入 `[REVIEW_APPROVED]`。應依意見修正後，用同一個 session 再跑：
 
@@ -371,7 +453,7 @@ python "$env:USERPROFILE\.codex\review-scripts\gemini_review.py"
 
 不可刪除 `.codex/review/gemini-session.json` 來重開上下文。只有使用者明確要求新 session 時，才使用 `[NEW_GEMINI_REVIEW_SESSION]`。
 
-### 10.7 跳過本次 Review Gate
+### 10.8 跳過本次 Review Gate
 
 若使用者明確在同一則任務訊息加入：
 
@@ -381,7 +463,7 @@ python "$env:USERPROFILE\.codex\review-scripts\gemini_review.py"
 
 本次任務可跳過 Gemini Review Gate。此指令只適用於該次任務，不代表永久停用 Review Gate。
 
-### 10.8 開新的 review session
+### 10.9 開新的 review session
 
 若 reviewer session 已經不適合延續，必須由使用者明確要求，例如：
 
@@ -416,6 +498,8 @@ Gemini Review Gate 可能會把以下內容送到 Gemini/Antigravity backend：
 | 情境 | 處理方式 |
 |---|---|
 | `.codex/review/` 不存在 | 先執行 `gemini_review.py` 初始化。 |
+| Stop hook 沒有生效 | 確認 `%USERPROFILE%\.codex\hooks.json` 存在，且 `command` 指向可執行的 `stop_review_gate.py`。 |
+| Stop hook 擋住結束 | 依訊息檢查 `implementation-plan.md`、`gemini-session.json` 與 `approval.marker`，完成 review 後再結束。 |
 | 沒有外送同意檔 | 先取得使用者明確同意，再建立 `external-review-consent.md`。 |
 | reviewer 回報 blocking issue | 修正問題、補驗證、同 session 重跑 review。 |
 | reviewer 沒有明確核准 | 不可寫入 `[REVIEW_APPROVED]`。 |
@@ -428,12 +512,15 @@ Gemini Review Gate 可能會把以下內容送到 Gemini/Antigravity backend：
 | 路徑 | 用途 |
 |---|---|
 | `./README.md` | 本工作流程主文件。 |
+| `./scripts/install-skill.js` | 本機部署腳本，可安裝 skill、review script、Stop hook 與設定範本。 |
 | `./prompts/` | Codex 與 Gemini reviewer 提示詞範本。 |
 | `./templates/` | `.codex/review/` 目標檔案範本。 |
-| `./environment-files/user-home/codex/` | 使用者 `%USERPROFILE%\.codex` 需要部署的 script 與設定範本。 |
+| `./environment-files/user-home/codex/` | 使用者 `%USERPROFILE%\.codex` 需要部署的 hooks、script 與設定範本。 |
 | `./environment-files/user-home/agents/` | 使用者 `%USERPROFILE%\.agents` 需要部署的 skill 範本。 |
 | `.codex/review/` | 專案 review gate 狀態資料夾。 |
 | `%USERPROFILE%\.codex\AGENTS.md` | Codex 使用者層級規則，包含 Gemini Review Gate 觸發與外送同意流程。 |
+| `%USERPROFILE%\.codex\hooks.json` | Codex Stop hook 設定，負責呼叫 `stop_review_gate.py`。 |
+| `%USERPROFILE%\.codex\hooks\stop_review_gate.py` | Stop hook 實作，負責在結束前檢查 review 是否通過。 |
 | `%USERPROFILE%\.agents\skills\gemini-review\SKILL.md` | `$gemini-review` skill 規則。 |
 | `%USERPROFILE%\.codex\review-scripts\gemini_review.py` | 實際執行 review backend 的 script。 |
 | `%USERPROFILE%\.codex\gemini-review.secrets.json` | backend 選擇與 CLI/API 連線設定。 |
@@ -444,7 +531,16 @@ Gemini Review Gate 可能會把以下內容送到 Gemini/Antigravity backend：
 - 不要用刪除 `gemini-session.json` 的方式逃避 reviewer 上一輪意見；只有使用者明確要求新 session 才可重開。
 - `implementation-plan.md` 要跟實際異動同步，否則 reviewer 會審錯範圍。
 - 外送同意只適用於 Gemini Review Gate，不代表其他任務可以任意外送專案資料。
-- 若 review script 或 backend 設定有更新，需同步檢查本文件與 `prompts/`、`templates/` 是否仍符合實際行為。
+- 若 review script、Stop hook 或 backend 設定有更新，需同步檢查本文件與 `prompts/`、`templates/`、`environment-files/` 是否仍符合實際行為。
 - 對外提供文件包前，應使用 `rg -uu "C:\\Users\\|<local-user-name>" .` 檢查是否殘留個人路徑或本機識別資訊。
+
+
+
+
+
+
+
+
+
 
 

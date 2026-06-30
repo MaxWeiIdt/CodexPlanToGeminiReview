@@ -1,4 +1,4 @@
-# Gemini Review Gate Instructions
+﻿# Gemini Review Gate Instructions
 
 本檔案是使用者層級的 Codex `AGENTS.md` 範本，建議放在：
 
@@ -112,6 +112,8 @@ Approved by user on: {yyyy-MM-dd}
 [SKIP_GEMINI_REVIEW]
 ```
 
+若專案已啟用 Stop hook，Codex 需要建立 `.codex/review/skip-once`，讓 `%USERPROFILE%\.codex\hooks\stop_review_gate.py` 放行本次回合。`skip-once` 只可用於使用者明確要求跳過的該次任務；Stop hook 讀到後會自動刪除此檔。
+
 ## Gemini Review Gate New Session Command
 
 若使用者在同一則任務訊息中明確包含以下字串，表示本次 Gemini Review Gate 要開新的 review session：
@@ -128,3 +130,4 @@ Approved by user on: {yyyy-MM-dd}
    - `api`：清除 `.codex/review/gemini-session.json` 的 `previous_interaction_id`。
 3. 不要刪除整個 `gemini-session.json`，只重開目前 backend 的 session。
 4. 只有使用者明確提出 `[NEW_GEMINI_REVIEW_SESSION]` 或要求開新 Gemini Review session 時才使用。
+
