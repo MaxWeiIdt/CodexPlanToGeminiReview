@@ -473,7 +473,30 @@ python "$env:USERPROFILE\.codex\review-scripts\gemini_review.py"
 
 Codex 需把 `[NEW_GEMINI_REVIEW_SESSION]` 寫入 `.codex/review/implementation-plan.md`。`gemini_review.py` 會依目前 backend 只清除對應 session 欄位，不會刪除整個 `gemini-session.json`。
 
-## 11. 外送同意規則
+## 11. 實測驗證與報告
+
+本 repo 另外整理了一份 Gemini Review Gate 的實測驗證說明，用來讓外部使用者理解此流程已經如何被試跑、觀察到哪些能力邊界，以及目前證據保存的限制。
+
+| 檔案或資料夾 | 說明 |
+|---|---|
+| `docs/gemini-review-capability-report.md` | 回顧式實測報告，整理 Gemini Review Gate 在文件整理、sandbox 程式碼審查與 reviewer feedback 流程中的觀察結果。 |
+| `docs/evidence/gemini-review-capability/` | 實測證據說明與限制，說明哪些資料有保留、哪些原始 round 記錄沒有保存。 |
+| `review-sandbox/` | 測試用樣本專案與說明，供維護者理解當時用來驗證 review 流程的程式碼情境。 |
+
+目前的驗證定位是「回顧式實測觀察」，不是完整可重播 benchmark。也就是說，本 repo 有保留整理後的測試樣本、報告與限制說明，但沒有保留 `round-01`、`round-02` 這類逐輪 review prompt、diff、raw response 的完整快照。因此閱讀報告時，應把它視為導入與維護參考，而不是可逐步重放的測試紀錄。
+
+最新一次針對此驗證報告整理工作的 Gemini Review Gate 結果為通過，reviewer 未提出 blocking issue。該輪審查確認的重點包含：
+
+| 驗證項目 | 結果 |
+|---|---|
+| Git 變更範圍 | 僅包含文件、測試資料說明與 `.gitignore` 調整，未改動產品程式碼邏輯。 |
+| 測試樣本清理 | `review-sandbox/BlindReviewSample/` 已排除 `bin/`、`obj/` 等編譯產物。 |
+| 報告定位 | 已明確標示為回顧式實測觀察，並列出證據保存限制。 |
+| 審查狀態 | Gemini Review Gate 已核准，無阻擋問題。 |
+
+若後續要把驗證資料提升為更正式的 benchmark，建議新增固定的 round 資料夾結構，例如 `docs/evidence/gemini-review-capability/round-01/`，並保存每輪的輸入 prompt、workspace diff 摘要、review output、修正摘要與最終 approval marker。這樣外部使用者才能重建每一輪 reviewer 如何判斷問題是否被修正。
+
+## 12. 外送同意規則
 
 Gemini Review Gate 可能會把以下內容送到 Gemini/Antigravity backend：
 
@@ -493,7 +516,7 @@ Gemini Review Gate 可能會把以下內容送到 Gemini/Antigravity backend：
 或明確告知 Codex 撤回同意
 ```
 
-## 12. 錯誤處理與例外情境
+## 13. 錯誤處理與例外情境
 
 | 情境 | 處理方式 |
 |---|---|
@@ -507,7 +530,7 @@ Gemini Review Gate 可能會把以下內容送到 Gemini/Antigravity backend：
 | backend CLI 不支援 `--add-dir` | 在 `gemini-review.secrets.json` 設定 `agy_add_dir` 為 `false`。 |
 | 需要指定 Antigravity project | 在 `gemini-review.secrets.json` 設定 `agy_project` 或 `project`。 |
 
-## 13. 路徑與檔案
+## 14. 路徑與檔案
 
 | 路徑 | 用途 |
 |---|---|
@@ -525,7 +548,7 @@ Gemini Review Gate 可能會把以下內容送到 Gemini/Antigravity backend：
 | `%USERPROFILE%\.codex\review-scripts\gemini_review.py` | 實際執行 review backend 的 script。 |
 | `%USERPROFILE%\.codex\gemini-review.secrets.json` | backend 選擇與 CLI/API 連線設定。 |
 
-## 14. 維護風險與建議
+## 15. 維護風險與建議
 
 - 不要把舊的 `[REVIEW_APPROVED]` 留給下一次任務使用；每次 review 前都要重設為 `[REVIEW_PENDING]`。
 - 不要用刪除 `gemini-session.json` 的方式逃避 reviewer 上一輪意見；只有使用者明確要求新 session 才可重開。
@@ -533,6 +556,8 @@ Gemini Review Gate 可能會把以下內容送到 Gemini/Antigravity backend：
 - 外送同意只適用於 Gemini Review Gate，不代表其他任務可以任意外送專案資料。
 - 若 review script、Stop hook 或 backend 設定有更新，需同步檢查本文件與 `prompts/`、`templates/`、`environment-files/` 是否仍符合實際行為。
 - 對外提供文件包前，應使用 `rg -uu "C:\\Users\\|<local-user-name>" .` 檢查是否殘留個人路徑或本機識別資訊。
+
+
 
 
 
